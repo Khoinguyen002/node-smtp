@@ -3,22 +3,15 @@ require("dotenv").config();
 const express = require("express");
 const nodemailer = require("nodemailer");
 const ipaddr = require("ipaddr.js");
+const { Redis } = require("@upstash/redis");
 
 const app = express();
+const redis = Redis.fromEnv();
 app.use(express.json());
 
 // If your app is behind a proxy (Cloudflare, nginx, load balancer), enable this:
 if (process.env.TRUST_PROXY === "true") {
   app.set("trust proxy", true);
-}
-
-// --- Helper: parse IP whitelist from env ---
-function parseWhitelist(envValue) {
-  if (!envValue || !envValue.trim()) return null;
-  return envValue
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 // returns true if clientIp is allowed by any entry in whitelist
@@ -83,21 +76,21 @@ function ipAllowed(clientIp, whitelist) {
   return false;
 }
 
-// load whitelist
-const WHITELIST = parseWhitelist(process.env.IP_WHITELIST);
-
 // -----------------------------
 // Middleware: IP whitelist
 // -----------------------------
-function ipWhitelistMiddleware(req, res, next) {
+async function ipWhitelistMiddleware(req, res, next) {
   // Get client IP. express's req.ip respects trust proxy if set.
   const clientIp = req.ip || req.connection.remoteAddress;
+  const whitelist = await redis.smembers(
+    process.env.UPSTASH_REDIS_IP_WHITELIST_KEY
+  );
 
-  if (!WHITELIST) {
+  if (!whitelist) {
     return next(); // no whitelist configured
   }
 
-  if (!ipAllowed(clientIp, WHITELIST)) {
+  if (!ipAllowed(clientIp, whitelist)) {
     return res.status(403).json({ error: "Forbidden: IP not allowed" });
   }
 

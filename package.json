@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node sever.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@upstash/redis": "^1.35.7",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "ipaddr.js": "^2.3.0",
