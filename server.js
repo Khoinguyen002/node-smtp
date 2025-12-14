@@ -82,17 +82,66 @@ function ipAllowed(clientIp, whitelist) {
 async function ipWhitelistMiddleware(req, res, next) {
   // Get client IP. express's req.ip respects trust proxy if set.
   const clientIp = req.ip || req.connection.remoteAddress;
-  const whitelist = await redis.smembers(
+
+  const cfIpWhitelist = (
+    await Promise.all([
+      await (await fetch("https://www.cloudflare.com/ips-v6")).text(),
+      await (await fetch("https://www.cloudflare.com/ips-v4")).text(),
+    ])
+  )
+    .join()
+    .trim()
+    .split("\n")
+    .map((line) => line.trim());
+
+  const redisWhitelist = await redis.smembers(
     process.env.UPSTASH_REDIS_IP_WHITELIST_KEY
   );
+
+  const whitelist = [...cfIpWhitelist, ...redisWhitelist];
 
   if (!whitelist) {
     return next(); // no whitelist configured
   }
 
   if (!ipAllowed(clientIp, whitelist)) {
-    return res.status(403).json({ error: "Forbidden: IP not allowed" });
+    const msg = "Forbidden: IP not allowed";
+    console.log(msg);
+
+    return res.status(403).json({ error: msg });
   }
+
+  next();
+}
+
+// -----------------------------
+// Middleware: Email whitelist
+// -----------------------------
+async function emailWhitelistMiddleware(req, res, next) {
+  const { to } = req.body;
+
+  const allowedEmailList = await redis.smembers(
+    process.env.UPSTASH_REDIS_EMAIL_WHITELIST_KEY
+  );
+
+  const isAllowed = (() => {
+    if (Array.isArray(to)) {
+      const allowedMails = to.filter((email) =>
+        allowedEmailList.includes(email)
+      );
+      if (allowedMails.length > 0) {
+        req.body.to = allowedMails;
+        return true;
+      }
+
+      return false;
+    }
+
+    return allowedEmailList.includes(to);
+  })();
+
+  if (!isAllowed)
+    return res.status(403).json({ error: "Email(s) are not allowed" });
 
   next();
 }
@@ -138,31 +187,55 @@ app.get("/", (req, res) => {
 // -----------------------------
 // Protected route — applies whitelist first, then token auth
 // -----------------------------
-app.post("/send", ipWhitelistMiddleware, authMiddleware, async (req, res) => {
-  try {
-    const { to, subject, text, html } = req.body;
+app.post(
+  "/send",
+  ipWhitelistMiddleware,
+  emailWhitelistMiddleware,
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { to, subject, text, html } = req.body;
 
-    if (!to || !subject) {
-      return res.status(400).json({ error: "Missing 'to' or 'subject'" });
+      if (!to || !subject) {
+        return res.status(400).json({ error: "Missing 'to' or 'subject'" });
+      }
+
+      const info = await transporter.sendMail({
+        from: process.env.EMAIL_FROM,
+        to,
+        subject,
+        text,
+        html,
+      });
+
+      return res.json({ messageId: info.messageId });
+    } catch (err) {
+      console.error("send error", err);
+      return res.status(500).json({ error: err.message });
     }
-
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
-      to,
-      subject,
-      text,
-      html,
-    });
-
-    return res.json({ messageId: info.messageId });
-  } catch (err) {
-    console.error("send error", err);
-    return res.status(500).json({ error: err.message });
   }
-});
+);
 
 // -----------------------------
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => {
   console.log(`SMTP middleware API running on port ${PORT}`);
 });
+
+// curl -X POST https://node-smtp.dounus.id.vn/send \
+//   -H "Content-Type: application/json" \
+//   -H "Authorization: Bearer hnZm5h6YHp61JEO47aL3TW49tovIdlJc" \
+//   -d '{
+//         "to": "nguyenvkhoi2002@gmail.com",
+//         "subject": "API Test",
+//         "text": "Hello via SMTP API!"
+//       }'
+
+// curl -X POST http://localhost:3000/send \
+//   -H "Content-Type: application/json" \
+//   -H "Authorization: Bearer 123456789" \
+//   -d '{
+//         "to": "nguyenvkhoi2002@gmail.com",
+//         "subject": "API Test",
+//         "text": "Hello via SMTP API!"
+//       }'
