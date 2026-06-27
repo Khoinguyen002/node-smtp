@@ -149,11 +149,14 @@ app.get("/", (req, res) => {
 
 app.post("/send", /* ipWhitelistMiddleware, emailWhitelistMiddleware, */ authMiddleware, async (req, res) => {
   try {
-    const { to, subject, text, html } = req.body;
+    const { fromName, to, subject, text, html } = req.body;
     if (!to || !subject) return res.status(400).json({ error: "Missing 'to' or 'subject'" });
 
+    const fromAddress = process.env.EMAIL_FROM;
+    const fromString = fromName ? `"${fromName}" <${fromAddress}>` : fromAddress;
+
     const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
+      from: fromString,
       to,
       subject,
       text,
