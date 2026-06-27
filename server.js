@@ -147,7 +147,7 @@ app.get("/", (req, res) => {
   res.json({ status: "SMTP API server running" });
 });
 
-app.post("/send", ipWhitelistMiddleware, emailWhitelistMiddleware, authMiddleware, async (req, res) => {
+app.post("/send", /* ipWhitelistMiddleware, emailWhitelistMiddleware, */ authMiddleware, async (req, res) => {
   try {
     const { to, subject, text, html } = req.body;
     if (!to || !subject) return res.status(400).json({ error: "Missing 'to' or 'subject'" });
